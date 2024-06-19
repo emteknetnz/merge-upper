@@ -92,7 +92,8 @@ foreach ($repositories['supportedModules'] as $repository) {
         $targetBranch = $matches[1];
     } else {
         echo "$packagist branch $currentBranch is not a version branch\n";
-        die;
+        $unprocessedPaths[] = (string) $PATH;
+        continue;
     }
     cmd("git checkout $targetBranch");
     $res = cmd("git merge --no-ff --no-commit $currentBranch");
