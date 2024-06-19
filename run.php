@@ -51,20 +51,42 @@ if ($expectedAdminBranch != $actualAdminBranch) {
 if (!file_exists('repositories.json')) {
     $c = file_get_contents('https://raw.githubusercontent.com/silverstripe/supported-modules/main/repositories.json');
     file_put_contents('repositories.json', $c);
-    echo "Run composer update\n";
-    die;
 }
 $json = file_get_contents('repositories.json');
 $repositories = json_decode($json, true);
 
+$i = 0;
 foreach ($repositories['supportedModules'] as $repository) {
     // packagist e.g. "silverstripe/admin", "dnadesign/silverstripe-elemental"
     $packagist = $repository['packagist'];
+    echo "\n\nProcessing $packagist\n\n";
+
+    if ($packagist == 'dnadesign/silverstripe-elemental') {
+        echo "Skipping dnadesign/silverstripe-elemental because it has an open pr\n";
+        continue;
+    }
+    if ($packagist == 'silverstripe/campaign-admin') {
+        echo "Skipping silverstripe/campaign-admin because it has an open pr\n";
+        continue;
+    }
+
+    $i++;
+    if ($i >= 5) {
+        echo "Stopping because i is too high\n";
+        break;
+    }
+
     if ($packagist == 'silverstripe/admin') {
         echo "Skipping silverstripe/admin because it should be merged-up manually first\n";
         continue;
     }
     $PATH = $rootDir . '/vendor/' . $packagist;
+    if (!file_exists("$PATH/$packagist")) {
+        echo "Skipping $packagist because it is not in the expected directory\n";
+        $unprocessedPaths[] = (string) $PATH;
+        continue;
+    }
+
     $currentBranch = cmd('git rev-parse --abbrev-ref HEAD');
     // work out $targetBranch
     if (preg_match('#^[0-9]$#', $currentBranch, $matches)) {
@@ -95,7 +117,12 @@ foreach ($repositories['supportedModules'] as $repository) {
         $unprocessedPaths[] = (string) $PATH;
         continue;
     }
-    cmd("git checkout $targetBranch");
+    $res = cmd("git checkout $targetBranch");
+    if (str_contains($res, 'error: pathspec')) {
+        echo "$packagist does not have a branch $targetBranch\n";
+        $unprocessedPaths[] = (string) $PATH;
+        continue;
+    }
     $res = cmd("git merge --no-ff --no-commit $currentBranch");
     if (str_contains($res, 'Already up to date.')) {
         echo "$packagist is already up to date\n";
@@ -105,7 +132,12 @@ foreach ($repositories['supportedModules'] as $repository) {
     cmd("git reset HEAD package.json");
     cmd("git reset HEAD yarn.lock");
     if (file_exists("$PATH/package.json")) {
-        cmd('yarn build');
+        $res = cmd('yarn build');
+        if (str_contains($res, 'error')) {
+            echo "Error found when running yarn build in $packagist\n";
+            $unprocessedPaths[] = (string) $PATH;
+            continue;
+        }
     }
     $status = cmd("git status");
     $lines = explode("\n", $status);
