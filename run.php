@@ -58,9 +58,6 @@ $json = file_get_contents('repositories.json');
 $repositories = json_decode($json, true);
 
 foreach ($repositories['supportedModules'] as $repository) {
-
-    $repository = ['packagist' => "silverstripe/campaign-admin"]; // <<<<<
-
     // packagist e.g. "silverstripe/admin", "dnadesign/silverstripe-elemental"
     $packagist = $repository['packagist'];
     if ($packagist == 'silverstripe/admin') {
