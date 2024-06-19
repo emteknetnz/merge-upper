@@ -59,10 +59,14 @@ $repositories = json_decode($json, true);
 
 foreach ($repositories['supportedModules'] as $repository) {
 
-    $repository = ['packagist' => "silverstripe/blog"]; // <<<<<
+    $repository = ['packagist' => "silverstripe/campaign-admin"]; // <<<<<
 
     // packagist e.g. "silverstripe/admin", "dnadesign/silverstripe-elemental"
     $packagist = $repository['packagist'];
+    if ($packagist == 'silverstripe/admin') {
+        echo "Skipping silverstripe/admin because it should be merged-up manually first\n";
+        continue;
+    }
     $PATH = $rootDir . '/vendor/' . $packagist;
     $currentBranch = cmd('git rev-parse --abbrev-ref HEAD');
     // work out $targetBranch
@@ -94,7 +98,14 @@ foreach ($repositories['supportedModules'] as $repository) {
         die;
     }
     cmd("git checkout $targetBranch");
-    cmd("git merge --no-ff --no-commit $currentBranch");
+    $res = cmd("git merge --no-ff --no-commit $currentBranch");
+    if (str_contains($res, 'Already up to date.')) {
+        echo "$packagist is already up to date\n";
+        continue;
+    }
+    if (file_exists("$PATH/package.json")) {
+        cmd('yarn build');
+    }
     cmd("git reset HEAD composer.json");
     cmd("git reset HEAD package.json");
     cmd("git reset HEAD yarn.lock");
@@ -120,6 +131,7 @@ foreach ($repositories['supportedModules'] as $repository) {
                 && ($notStagedFiles[0] != 'package.json' || $notStagedFiles[1] != 'yarn.lock')
             )
         ) {
+            echo "There are unstaged files in $packagist that should be looked at\n";
             $allowed = false;
         }
     }
@@ -127,6 +139,7 @@ foreach ($repositories['supportedModules'] as $repository) {
     if ($allowed && count($notStagedFiles) && $notStagedFiles[0] == 'package.json') {
         $diff = cmd('git diff package.json');
         $allowedJsonKeysDiff = [
+            'lint',
             'lint-sass',
             '@silverstripe/eslint-config',
         ];
@@ -142,14 +155,26 @@ foreach ($repositories['supportedModules'] as $repository) {
             echo "There is a diff in package.json, though it IS NOT allowed\n";
         }
     }
+    // check for merge conflicts
+    foreach ($notStagedFiles as $file) {
+        $c = file_get_contents("$PATH/$file");
+        if (str_contains($c, '<<<<<<< HEAD')) {
+            echo "Unresolved merge conflict in $PATH/$file\n";
+            $allowed = false;
+        }
+    }
     if (!$allowed) {
         echo "Unstaged files in $packagist require manual attention, continuing\n";
         $allowed = false;
         $unprocessedPaths[] = (string) $PATH;
-        die; /// 
         continue;
     }
-    die;
+    if (!count($notStagedFiles)) {
+        cmd('git add .');
+    }
+    cmd("git commit -m \"Merge branch '$currentBranch' into $targetBranch\"");
+    cmd('git push');
+    echo "Sucessfully merged-up $packagist from $currentBranch to $targetBranch\n";
 }
 
 echo "Done\n";
