@@ -101,12 +101,12 @@ foreach ($repositories['supportedModules'] as $repository) {
         echo "$packagist is already up to date\n";
         continue;
     }
-    if (file_exists("$PATH/package.json")) {
-        cmd('yarn build');
-    }
     cmd("git reset HEAD composer.json");
     cmd("git reset HEAD package.json");
     cmd("git reset HEAD yarn.lock");
+    if (file_exists("$PATH/package.json")) {
+        cmd('yarn build');
+    }
     $status = cmd("git status");
     $lines = explode("\n", $status);
     $isNotStaged = false;
@@ -142,18 +142,20 @@ foreach ($repositories['supportedModules'] as $repository) {
             '@silverstripe/eslint-config',
         ];
         preg_match_all("#\n[\+\-] +\"(.+?)\"#", $diff, $matches);
+        $packageJsonAllowed = true;
         foreach ((array) $matches[1] as $jsonKey) {
             if (!in_array($jsonKey, $allowedJsonKeysDiff)) {
+                $packageJsonAllowed = false;
                 $allowed = false;
             }
         }
-        if ($allowed) {
+        if ($packageJsonAllowed) {
             echo "There is a diff in package.json, though it IS allowed\n";
         } else {
             echo "There is a diff in package.json, though it IS NOT allowed\n";
         }
     }
-    // check for merge conflicts
+    // check for merge conflicts in unstaged files (probably shouldn't happen)
     foreach ($notStagedFiles as $file) {
         $c = file_get_contents("$PATH/$file");
         if (str_contains($c, '<<<<<<< HEAD')) {
@@ -161,15 +163,24 @@ foreach ($repositories['supportedModules'] as $repository) {
             $allowed = false;
         }
     }
+    // check for regular merge conflicts
+    $status = cmd('git status');
+    if (str_contains($status, 'Unmerged paths:')) {
+        echo "Unmerged paths in $packagist require manual attention\n";
+        $allowed = false;
+    }
+    // check for untracked files
+    if (str_contains($status, 'Untracked files:')) {
+        echo "Untracked files in $packagist that should be looked at\n";
+        $allowed = false;
+    }
     if (!$allowed) {
-        echo "Unstaged files in $packagist require manual attention, continuing\n";
+        echo "Files in $packagist require manual attention, continuing\n";
         $allowed = false;
         $unprocessedPaths[] = (string) $PATH;
         continue;
     }
-    if (!count($notStagedFiles)) {
-        cmd('git add .');
-    }
+    cmd('git add .');
     cmd("git commit -m \"Merge branch '$currentBranch' into $targetBranch\"");
     cmd('git push');
     echo "Sucessfully merged-up $packagist from $currentBranch to $targetBranch\n";
