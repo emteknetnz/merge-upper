@@ -2,6 +2,8 @@
 
 Tool to automate doing mass merge-ups on silverstripe/recipe-kitchen-sink
 
+**Paused work because changes in style lint was causing new yarn build errors which I was then pushing - automating anything with changes in package.json is just a bad idea**
+
 ## Usage
 
 `php run.php <expectedAdminBranch> <isBeta>`
