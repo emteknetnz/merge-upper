@@ -1,11 +1,12 @@
 <?php
 
 $PATH = '.';
+$unprocessedPaths = [];
 
 function cmd($cmd) {
     global $PATH;
     echo "Running $cmd in $PATH\n";
-    return shell_exec("cd $PATH >/dev/null && $cmd");
+    return trim(shell_exec("cd $PATH >/dev/null && $cmd"));
 }
 
 $rootDir = __DIR__;
@@ -37,7 +38,7 @@ if (!in_array($isBeta, ['true', 'false'])) {
 $isBeta = $isBeta == 'true';
 
 if (!file_exists("$rootDir/vendor/silverstripe/admin/node_modules")) {
-    echo "\nRun yarn install in $rootDir/vendor/silverstripe/admin\n\n! AND MAKE SURE it's the version you are merging up into\n\nYou should manually merge-up admin all the way through first\n\n";
+    echo "\nRun yarn install in $rootDir/vendor/silverstripe/admin\n\nYou should manually merge-up admin all the way through before running this script. Remember to run yarn build as you go\n\n";
     die;
 }
 
@@ -57,10 +58,14 @@ $json = file_get_contents('repositories.json');
 $repositories = json_decode($json, true);
 
 foreach ($repositories['supportedModules'] as $repository) {
+
+    $repository = ['packagist' => "silverstripe/blog"]; // <<<<<
+
     // packagist e.g. "silverstripe/admin", "dnadesign/silverstripe-elemental"
     $packagist = $repository['packagist'];
     $PATH = $rootDir . '/vendor/' . $packagist;
     $currentBranch = cmd('git rev-parse --abbrev-ref HEAD');
+    // work out $targetBranch
     if (preg_match('#^[0-9]$#', $currentBranch, $matches)) {
         $targetBranch = $currentBranch + 1;
         cmd('git fetch');
@@ -88,5 +93,70 @@ foreach ($repositories['supportedModules'] as $repository) {
         echo "$packagist branch $currentBranch is not a version branch\n";
         die;
     }
+    cmd("git checkout $targetBranch");
+    cmd("git merge --no-ff --no-commit $currentBranch");
+    cmd("git reset HEAD composer.json");
+    cmd("git reset HEAD package.json");
+    cmd("git reset HEAD yarn.lock");
+    $status = cmd("git status");
+    $lines = explode("\n", $status);
+    $isNotStaged = false;
+    $allowed = true;
+    $notStagedFiles = [];
+    foreach ($lines as $line) {
+        if ($line == 'Changes not staged for commit:') {
+            $isNotStaged = true;
+        }
+        if ($isNotStaged && preg_match('#modified: +(.+?)$#', $line, $matches)) {
+            $notStagedFiles[] = $matches[1];
+        }
+        sort($notStagedFiles);
+        if (
+            (
+                count($notStagedFiles) == 1
+                && $notStagedFiles[0] != 'package.json')
+            || (
+                count($notStagedFiles) == 2
+                && ($notStagedFiles[0] != 'package.json' || $notStagedFiles[1] != 'yarn.lock')
+            )
+        ) {
+            $allowed = false;
+        }
+    }
+    // check if contents of package.json can be automatically merged
+    if ($allowed && count($notStagedFiles) && $notStagedFiles[0] == 'package.json') {
+        $diff = cmd('git diff package.json');
+        $allowedJsonKeysDiff = [
+            'lint-sass',
+            '@silverstripe/eslint-config',
+        ];
+        preg_match_all("#\n[\+\-] +\"(.+?)\"#", $diff, $matches);
+        foreach ((array) $matches[1] as $jsonKey) {
+            if (!in_array($jsonKey, $allowedJsonKeysDiff)) {
+                $allowed = false;
+            }
+        }
+        if ($allowed) {
+            echo "There is a diff in package.json, though it IS allowed\n";
+        } else {
+            echo "There is a diff in package.json, though it IS NOT allowed\n";
+        }
+    }
+    if (!$allowed) {
+        echo "Unstaged files in $packagist require manual attention, continuing\n";
+        $allowed = false;
+        $unprocessedPaths[] = (string) $PATH;
+        die; /// 
+        continue;
+    }
     die;
+}
+
+echo "Done\n";
+
+if (count($unprocessedPaths)) {
+    echo "The current paths requires manual attention:\n";
+    foreach ($unprocessedPaths as $path) {
+        echo "$path\n";
+    }
 }
